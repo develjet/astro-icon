@@ -1,0 +1,96 @@
+---
+// src/Icon.astro
+import type { HTMLAttributes } from "astro/types";
+import { getIconData, iconToSVG } from "@iconify/utils";
+import localIcons, { iconSets } from "virtual:astro-icon/local-icons";
+
+export interface IconProps extends HTMLAttributes<"svg"> {
+  name: string;
+  size?: number | string;
+  class?: string;
+}
+
+interface Props extends IconProps {}
+
+const { name, size = "1em", class: className, ...props } = Astro.props;
+
+let innerHTML = "";
+let svgAttributes: Record<string, any> = {};
+
+if (name.includes(":")) {
+  // --- COLLECTION ICON LOGIC ---
+  const [prefix, iconName] = name.split(":");
+
+  let collection;
+
+  // Use the pre-indexed icon sets from the virtual module
+  if (iconSets && (iconSets as any)[prefix]) {
+    try {
+      const loader = (iconSets as any)[prefix];
+      const module = (await loader()) as any;
+      collection = module.default || module;
+    } catch (e) {
+      console.error(`[astro-icon] Failed to load icon set "@iconify-json/${prefix}":`, e);
+    }
+  }
+
+  // Fallback if not in iconSets or failed to load
+  if (!collection) {
+    try {
+      const module = await import(`@iconify-json/${prefix}/icons.json`);
+      collection = module.default || module;
+    } catch (e) {
+      // Silent fail or handled below
+    }
+  }
+
+  if (!collection) {
+    throw new Error(
+      `[Icon] Unable to find icon set "@iconify-json/${prefix}". Is it installed and listed in your package.json?`,
+    );
+  }
+
+  const iconData = getIconData(collection, iconName);
+  if (!iconData) {
+    throw new Error(`[Icon] Icon "${iconName}" does not exist in set "${prefix}"`);
+  }
+
+  const renderData = iconToSVG(iconData, {
+    height: size,
+    width: size,
+  });
+
+  innerHTML = renderData.body;
+  svgAttributes = renderData.attributes;
+} else {
+  // --- LOCAL ICON LOGIC ---
+  const iconPath = Object.keys(localIcons).find((path) => {
+    return path.endsWith(`/${name}.svg`);
+  });
+
+  const rawSvg = (localIcons[iconPath || ""] as any)?.default;
+
+  if (!rawSvg) {
+    throw new Error(`[Icon] Local icon "${name}" not found in configured directory.`);
+  }
+
+  const svgMatch = rawSvg.match(/<svg([^>]*)>([\s\S]*)<\/svg>/i);
+  if (!svgMatch) {
+    throw new Error(`[Icon] Invalid SVG content in local icon "${name}"`);
+  }
+
+  const rawAttributes = svgMatch[1];
+  innerHTML = svgMatch[2];
+
+  const attrRegex = /([\w-]+)="([^"]*)"/g;
+  let match;
+  while ((match = attrRegex.exec(rawAttributes)) !== null) {
+    svgAttributes[match[1]] = match[2];
+  }
+
+  svgAttributes.width = size;
+  svgAttributes.height = size;
+}
+---
+
+<svg {...svgAttributes} {...props} class={className} set:html={innerHTML} />
